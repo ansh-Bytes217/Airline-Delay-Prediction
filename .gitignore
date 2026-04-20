@@ -1,0 +1,28 @@
+# Python Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+backend/prediction_log.jsonl
+
+# Node / React Build Output
+node_modules/
+dist/
+.env
+.env.local
+.vercel
+
+# Java / Spring Boot Build Output
+target/
+.mvn/
+.idea/
+*.class
+*.jar
+*.war
+*.zip
+*.tar.gz
+**/target/
