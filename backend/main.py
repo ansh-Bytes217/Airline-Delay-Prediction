@@ -9,14 +9,19 @@ import time
 import random
 import httpx
 import os
+from typing import Optional, List, Dict, Any
 
 # ── RAG Pipeline ─────────────────────────────────────────────────────────────
-try:
-    from rag_pipeline import ask_question, init_rag_pipeline
-    RAG_AVAILABLE = True
-except ImportError as e:
-    logging.warning(f"RAG dependencies not met: {e}")
+if os.environ.get("LOW_MEMORY_MODE") == "true":
     RAG_AVAILABLE = False
+    logging.info("LOW_MEMORY_MODE active: RAG pipeline disabled.")
+else:
+    try:
+        from rag_pipeline import ask_question, init_rag_pipeline
+        RAG_AVAILABLE = True
+    except ImportError as e:
+        logging.warning(f"RAG dependencies not met: {e}")
+        RAG_AVAILABLE = False
 
 # ── ML Libraries ─────────────────────────────────────────────────────────────
 try:
@@ -33,6 +38,8 @@ except ImportError:
 _text_classifier = None
 def _get_text_classifier():
     global _text_classifier
+    if os.environ.get("LOW_MEMORY_MODE") == "true":
+        return None
     if _text_classifier is None:
         try:
             from transformers import pipeline as hf_pipeline
@@ -49,7 +56,7 @@ def _get_text_classifier():
 def extract_text_risk_score(flight_notes: str) -> float:
     """
     Run DistilBERT sentiment classifier on flight notes.
-    Negative sentiment (storms, delays, alerts) maps to a high disruption risk score.
+    Negative sentiment maps to a high disruption risk score.
     Returns a float in [0, 1] representing the probability of disruption.
     """
     if not flight_notes or not flight_notes.strip():
@@ -59,7 +66,6 @@ def extract_text_risk_score(flight_notes: str) -> float:
         if clf is None:
             return 0.35
         results = clf(flight_notes[:512])[0]  # truncate for transformer
-        # results is a list like [{'label': 'NEGATIVE', 'score': 0.98}, ...]
         neg_score = next((r['score'] for r in results if r['label'] == 'NEGATIVE'), 0.35)
         return round(float(neg_score), 4)
     except Exception as e:
@@ -76,7 +82,7 @@ except ImportError:
 # ── Rate Limiter ──────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
-# ── Weather Integration (Open-Meteo) ──────────────────────────────────────────
+# ── Weather Integration (Open-Meteo) — Fallback / Local testing ──────────────
 AIRPORT_COORDS = {
     'ATL': {'lat': 33.6407, 'lon': -84.4277},
     'ORD': {'lat': 41.9742, 'lon': -87.9073},
@@ -165,19 +171,19 @@ class ChatRequest(BaseModel):
     message: str
 
 class WeatherData(BaseModel):
-    temp: float
-    temp_apparent: float
-    humidity: float
-    precipitation: float
-    rain: float
-    showers: float
-    snowfall: float
-    wind_speed: float
-    weather_code: int
-    description: str
-    impact: str
-    multiplier: float
-    reason: str
+    temp: Optional[float] = 20.0
+    temp_apparent: Optional[float] = 20.0
+    humidity: Optional[float] = 50.0
+    precipitation: Optional[float] = 0.0
+    rain: Optional[float] = 0.0
+    showers: Optional[float] = 0.0
+    snowfall: Optional[float] = 0.0
+    wind_speed: Optional[float] = 5.0
+    weather_code: Optional[int] = 0
+    description: Optional[str] = "Clear sky"
+    impact: Optional[str] = "Low"
+    multiplier: Optional[float] = 1.0
+    reason: Optional[str] = "Clear weather conditions"
 
 class FlightData(BaseModel):
     Airline: str
@@ -187,14 +193,14 @@ class FlightData(BaseModel):
     Time: int
     Length: int
     model: str = "ensemble"
-    weather: WeatherData = None
-    flight_notes: str = ""   # Optional unstructured text for DistilBERT risk extraction
+    weather: Optional[WeatherData] = None
+    flight_notes: Optional[str] = ""
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# ── App Initialization ────────────────────────────────────────────────────────
 app = FastAPI(
-    title="SkyPredict API",
-    description="Airline Delay Prediction + RAG Chatbot + Live Flights + Analytics",
-    version="2.0.0",
+    title="SkyPredict ML Sidecar",
+    description="Dedicated ML execution and RAG chatbot sidecar service",
+    version="3.0.0",
 )
 
 app.state.limiter = limiter
@@ -208,21 +214,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Startup ───────────────────────────────────────────────────────────────────
+# ── Startup event ────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
     logging.basicConfig(level=logging.INFO)
-    logging.info("SkyPredict API v2.0 started")
+    logging.info("SkyPredict ML Sidecar listening on port 8090")
+    # Lazy load models and mappings on-demand inside the endpoints to prevent Vercel 10s startup timeouts
+    if RAG_AVAILABLE:
+        import threading
+        threading.Thread(target=init_rag_pipeline, daemon=True).start()
 
 # ── Model Loading ─────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 MODEL_PATH    = os.path.join(BASE_DIR, "best_model.pkl")
 XGB_PATH      = os.path.join(BASE_DIR, "xgb_model.pkl")
 CAT_PATH      = os.path.join(BASE_DIR, "cat_model.pkl")
+NN_KERAS_PATH = os.path.join(BASE_DIR, "keras_model.h5")
+NN_PKL_PATH   = os.path.join(BASE_DIR, "keras_model.pkl")
+MAPPINGS_PATH = os.path.join(BASE_DIR, "feature_mappings.pkl")
 
-model = xgb_model = cat_model = None
-if HAS_ML_LIBS:
-    for path, name in [(MODEL_PATH, "ensemble"), (XGB_PATH, "xgboost"), (CAT_PATH, "catboost")]:
+model = xgb_model = cat_model = nn_model = None
+is_keras_nn = False
+feature_mappings = None
+
+def load_models():
+    global model, xgb_model, cat_model, nn_model, is_keras_nn
+    if not HAS_ML_LIBS:
+        return
+        
+    # In low memory mode, only load the lightweight ensemble model (4.5MB)
+    targets = [(MODEL_PATH, "ensemble")]
+    if os.environ.get("LOW_MEMORY_MODE") != "true":
+        targets.extend([(XGB_PATH, "xgboost"), (CAT_PATH, "catboost")])
+        
+    for path, name in targets:
         if os.path.exists(path):
             try:
                 loaded = joblib.load(path)
@@ -232,10 +257,38 @@ if HAS_ML_LIBS:
                 logging.info(f"Loaded {name} model from {path}")
             except Exception as e:
                 logging.warning(f"Could not load {name}: {e}")
+                
     if model is None and (xgb_model or cat_model):
         model = xgb_model or cat_model
 
-# ── Flight Cache ──────────────────────────────────────────────────────────────
+    # Load Neural Network Model
+    if os.path.exists(NN_KERAS_PATH):
+        try:
+            from tensorflow.keras.models import load_model
+            nn_model = load_model(NN_KERAS_PATH)
+            is_keras_nn = True
+            logging.info("Loaded Keras Neural Network from keras_model.h5")
+        except Exception as e:
+            logging.warning(f"Failed to load Keras model: {e}")
+
+    if nn_model is None and os.path.exists(NN_PKL_PATH):
+        try:
+            nn_model = joblib.load(NN_PKL_PATH)
+            is_keras_nn = False
+            logging.info("Loaded fallback MLP Neural Network from keras_model.pkl")
+        except Exception as e:
+            logging.warning(f"Failed to load fallback MLP model: {e}")
+
+def load_feature_mappings():
+    global feature_mappings
+    if os.path.exists(MAPPINGS_PATH):
+        try:
+            feature_mappings = joblib.load(MAPPINGS_PATH)
+            logging.info("Loaded engineered feature mappings.")
+        except Exception as e:
+            logging.error(f"Failed to load feature mappings: {e}")
+
+# ── Flight Cache for Fallback ───────────────────────────────────────────────
 _flight_cache: dict = {"data": None, "timestamp": 0}
 FLIGHT_CACHE_TTL = 15
 
@@ -252,9 +305,11 @@ SIMULATED_FLIGHTS = [
     for i in range(200)
 ]
 
-# ── Feature Engineering ───────────────────────────────────────────────────────
-def feature_engineering_single_row(data_dict, text_risk_score: float = 0.35):
+# ── Feature Engineering Single Row ───────────────────────────────────────────
+def feature_engineering_single_row(data_dict, weather_input=None, text_risk_score: float = 0.35):
     df = pd.DataFrame([data_dict])
+    
+    # Base Features
     if "Time" in df.columns:
         df["Departure_Hour"] = (df["Time"] // 60).astype(int)
         df["Departure_TimeOfDay"] = pd.cut(
@@ -271,11 +326,60 @@ def feature_engineering_single_row(data_dict, text_risk_score: float = 0.35):
     busy = ["ATL","ORD","DFW","DEN","LAX","SFO","LAS","PHX","MCO","IAH"]
     if "AirportFrom" in df.columns:
         df["Is_Busy_Airport"] = df["AirportFrom"].apply(lambda x: 1 if x in busy else 0)
-    # 🧬 Inject DistilBERT text risk score as a tabular feature
+        
     df["Text_Risk_Score"] = text_risk_score
+
+    # Map historical delay rates
+    if feature_mappings:
+        global_rate = feature_mappings['global_delay_rate']
+        airline_rates = feature_mappings['airline_delay_rates']
+        route_rates = feature_mappings['route_delay_rates']
+        
+        df['Airline_Delay_Rate'] = df['Airline'].map(airline_rates).fillna(global_rate)
+        route_key = df['AirportFrom'] + "_" + df['AirportTo']
+        df['Route_Delay_Rate'] = route_key.map(route_rates).fillna(global_rate)
+    else:
+        df['Airline_Delay_Rate'] = 0.35
+        df['Route_Delay_Rate'] = 0.35
+
+    # Extract weather values
+    if weather_input:
+        df['Wind_Speed'] = float(weather_input.get('wind_speed', 8.0))
+        df['Precipitation'] = float(weather_input.get('precipitation', 0.0))
+        df['Weather_Multiplier'] = float(weather_input.get('multiplier', 1.0))
+    else:
+        df['Wind_Speed'] = 8.0
+        df['Precipitation'] = 0.0
+        df['Weather_Multiplier'] = 1.0
+
     return df
 
-def _run_model(m, df):
+def run_nn_prediction(nn, df_transformed):
+    if is_keras_nn:
+        prob = float(nn.predict(df_transformed)[0][0])
+        pred = 1 if prob >= 0.5 else 0
+        return pred, prob
+    else:
+        pred = int(nn.predict(df_transformed)[0])
+        prob = float(nn.predict_proba(df_transformed)[0][1])
+        return pred, prob
+
+def _run_model(m, df, chosen_model_name="ensemble"):
+    # If using neural network model, process transformed input
+    if chosen_model_name == "nn":
+        # Extract preprocessor from another loaded model
+        preprocessor = None
+        for pipe in [model, xgb_model, cat_model]:
+            if pipe is not None and hasattr(pipe, "named_steps") and "preprocessor" in pipe.named_steps:
+                preprocessor = pipe.named_steps["preprocessor"]
+                break
+        if preprocessor is not None:
+            df_transformed = preprocessor.transform(df)
+            prediction, probability = run_nn_prediction(m, df_transformed)
+        else:
+            prediction, probability = 0, 0.35
+        return prediction, probability, []
+
     prediction = int(m.predict(df)[0])
     try:
         probability = float(m.predict_proba(df)[0][1])
@@ -289,10 +393,12 @@ def _run_model(m, df):
         X_transformed = preprocessor.transform(df)
         if not isinstance(X_transformed, np.ndarray):
             X_transformed = X_transformed.toarray()
+            
         explainer = shap.TreeExplainer(classifier)
         shap_values = explainer.shap_values(X_transformed)
         if isinstance(shap_values, list):
             shap_values = shap_values[1]
+            
         num_cols = df.select_dtypes(include=["int64","float64","int32"]).columns.tolist()
         cat_cols = df.select_dtypes(include=["object","category","string"]).columns.tolist()
         cat_enc = preprocessor.named_transformers_["cat"]
@@ -306,7 +412,7 @@ def _run_model(m, df):
 
     return prediction, probability, shap_explanation
 
-# ── /weather/{airport} ────────────────────────────────────────────────────────
+# ── /weather/{airport} — Fallback ────────────────────────────────────────────
 @app.get("/weather/{airport}")
 async def get_airport_weather(airport: str):
     airport = airport.upper()
@@ -327,7 +433,6 @@ async def get_airport_weather(airport: str):
             }
         }
     except Exception as e:
-        logging.warning(f"Failed to fetch weather for {airport}: {e}")
         return {
             "airport": airport,
             "coords": AIRPORT_COORDS.get(airport, {"lat": 0, "lon": 0}),
@@ -352,32 +457,32 @@ async def get_airport_weather(airport: str):
 @app.post("/predict")
 @limiter.limit("30/minute")
 async def predict_delay(request: Request, flight: FlightData):
+    # Proactively reload models and mappings if not loaded
+    if HAS_ML_LIBS and (model is None or feature_mappings is None):
+        load_models()
+        load_feature_mappings()
+
     data_dict = flight.model_dump()
     chosen_model_name = data_dict.pop("model", "ensemble")
     weather_input = data_dict.pop("weather", None)
 
-    # Fetch weather if not provided
-    if not weather_input:
-        airport = data_dict.get("AirportFrom", "").upper()
-        if airport in AIRPORT_COORDS:
-            try:
-                coords = AIRPORT_COORDS[airport]
-                w = await fetch_weather(coords['lat'], coords['lon'])
-                desc = get_weather_description(w['weather_code'])
-                imp = get_weather_impact(w)
-                weather_input = {
-                    **w,
-                    "description": desc,
-                    **imp
-                }
-            except Exception:
-                pass
+    # Convert Pydantic Weather object to dict if it exists
+    if weather_input is not None:
+        if hasattr(weather_input, "model_dump"):
+            weather_dict = weather_input.model_dump()
+        elif hasattr(weather_input, "dict"):
+            weather_dict = weather_input.dict()
+        else:
+            weather_dict = weather_input
+    else:
+        weather_dict = None
 
-    if not HAS_ML_LIBS or model is None:
+    if not HAS_ML_LIBS or (model is None and nn_model is None):
+        # Mock prediction fallback
         is_delayed = random.choice([0, 1])
         prob = random.uniform(0.5, 0.99) if is_delayed else random.uniform(0.01, 0.49)
-        if weather_input:
-            prob = min(prob * weather_input.get("multiplier", 1.0), 0.99)
+        if weather_dict:
+            prob = min(prob * weather_dict.get("multiplier", 1.0), 0.99)
             is_delayed = 1 if prob >= 0.5 else 0
         return {
             "prediction": is_delayed,
@@ -385,21 +490,24 @@ async def predict_delay(request: Request, flight: FlightData):
             "shap_values": [],
             "model_used": "mock",
             "status": "success",
-            "message": "Mock prediction" + (" with weather adjustment" if weather_input and weather_input.get("multiplier", 1.0) > 1.0 else ""),
-            "weather": weather_input
+            "message": "Mock prediction",
+            "weather": weather_dict
         }
 
     try:
         flight_notes = data_dict.pop("flight_notes", "")
         text_risk_score = extract_text_risk_score(flight_notes)
-        df = feature_engineering_single_row(data_dict, text_risk_score=text_risk_score)
-        chosen = {"xgboost": xgb_model, "catboost": cat_model}.get(chosen_model_name) or model
+        df = feature_engineering_single_row(data_dict, weather_input=weather_dict, text_risk_score=text_risk_score)
+        
+        # Select model
+        chosen = {"xgboost": xgb_model, "catboost": cat_model, "nn": nn_model}.get(chosen_model_name) or model
         if chosen is None:
             chosen = model
-        prediction, probability, shap_explanation = _run_model(chosen, df)
+            
+        prediction, probability, shap_explanation = _run_model(chosen, df, chosen_model_name)
 
-        if weather_input:
-            multiplier = weather_input.get("multiplier", 1.0)
+        if weather_dict:
+            multiplier = weather_dict.get("multiplier", 1.0)
             probability = min(probability * multiplier, 0.99)
             prediction = 1 if probability >= 0.5 else 0
 
@@ -412,74 +520,75 @@ async def predict_delay(request: Request, flight: FlightData):
             "shap_values": shap_explanation,
             "model_used": chosen_model_name,
             "status": "success",
-            "message": f"Prediction from {chosen_model_name} model" + (" with weather adjustment" if weather_input and weather_input.get("multiplier", 1.0) > 1.0 else ""),
-            "weather": weather_input
+            "message": f"Prediction from {chosen_model_name} model",
+            "weather": weather_dict
         }
     except Exception as e:
+        logging.exception("Prediction failed:")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ── /predict/ab — side-by-side comparison ────────────────────────────────────
+# ── /predict/ab ─────────────────────────────────────────────────────────────
 @app.post("/predict/ab")
 @limiter.limit("20/minute")
 async def predict_ab(request: Request, flight: FlightData):
+    # Proactively reload models and mappings if not loaded
+    if HAS_ML_LIBS and (model is None or feature_mappings is None):
+        load_models()
+        load_feature_mappings()
+
     data_dict = flight.model_dump()
     data_dict.pop("model", None)
     weather_input = data_dict.pop("weather", None)
 
-    # Fetch weather if not provided
-    if not weather_input:
-        airport = data_dict.get("AirportFrom", "").upper()
-        if airport in AIRPORT_COORDS:
-            try:
-                coords = AIRPORT_COORDS[airport]
-                w = await fetch_weather(coords['lat'], coords['lon'])
-                desc = get_weather_description(w['weather_code'])
-                imp = get_weather_impact(w)
-                weather_input = {
-                    **w,
-                    "description": desc,
-                    **imp
-                }
-            except Exception:
-                pass
+    if weather_input is not None:
+        if hasattr(weather_input, "model_dump"):
+            weather_dict = weather_input.model_dump()
+        elif hasattr(weather_input, "dict"):
+            weather_dict = weather_input.dict()
+        else:
+            weather_dict = weather_input
+    else:
+        weather_dict = None
 
-    if not HAS_ML_LIBS or model is None:
+    if not HAS_ML_LIBS or (model is None and nn_model is None):
         def mock():
             is_delayed = random.choice([0,1])
             prob = random.uniform(0.3,0.99)
-            if weather_input:
-                prob = min(prob * weather_input.get("multiplier", 1.0), 0.99)
+            if weather_dict:
+                prob = min(prob * weather_dict.get("multiplier", 1.0), 0.99)
                 is_delayed = 1 if prob >= 0.5 else 0
             return {
                 "prediction": is_delayed,
                 "probability": round(prob, 3),
                 "shap_values": [],
-                "weather": weather_input
+                "weather": weather_dict
             }
-        return {"xgboost": mock(), "catboost": mock(), "ensemble": mock()}
+        return {"xgboost": mock(), "catboost": mock(), "ensemble": mock(), "nn": mock()}
 
     try:
         flight_notes = data_dict.pop("flight_notes", "")
         text_risk_score = extract_text_risk_score(flight_notes)
-        df = feature_engineering_single_row(data_dict, text_risk_score=text_risk_score)
+        df = feature_engineering_single_row(data_dict, weather_input=weather_dict, text_risk_score=text_risk_score)
+        
         results = {}
-        for name, m in [("xgboost", xgb_model), ("catboost", cat_model), ("ensemble", model)]:
+        for name, m in [("xgboost", xgb_model), ("catboost", cat_model), ("ensemble", model), ("nn", nn_model)]:
             if m is not None:
-                pred, prob, shap = _run_model(m, df)
-                if weather_input:
-                    multiplier = weather_input.get("multiplier", 1.0)
+                pred, prob, shap = _run_model(m, df, name)
+                if weather_dict:
+                    multiplier = weather_dict.get("multiplier", 1.0)
                     prob = min(prob * multiplier, 0.99)
                     pred = 1 if prob >= 0.5 else 0
                 results[name] = {
                     "prediction": pred,
                     "probability": prob,
                     "shap_values": shap,
-                    "weather": weather_input
+                    "weather": weather_dict
                 }
             else:
                 results[name] = None
         return results
     except Exception as e:
+        logging.exception("AB Prediction failed:")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── /chat ────────────────────────────────────────────────────────────────────
@@ -496,7 +605,7 @@ async def chat_endpoint(req: ChatRequest):
             formatted_sources.append(clean)
     return {"answer": answer, "sources": formatted_sources}
 
-# ── /upload-doc — dynamic RAG document ingestion ─────────────────────────────
+# ── /upload-doc ──────────────────────────────────────────────────────────────
 @app.post("/upload-doc")
 async def upload_document(file: UploadFile = File(...)):
     if not RAG_AVAILABLE:
@@ -514,10 +623,7 @@ async def upload_document(file: UploadFile = File(...)):
     with open(save_path, "wb") as f:
         f.write(content)
 
-    # Re-initialise RAG to include the new doc
     try:
-        from rag_pipeline import init_rag_pipeline
-        # Reset so next query reinitialises with all docs
         import rag_pipeline as rp
         if hasattr(rp, "retriever"):
             rp.retriever = None
@@ -526,7 +632,7 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Document saved but RAG re-init failed: {e}")
 
-# ── /monitoring/drift — KS statistical drift detection ──────────────────────
+# ── /monitoring/drift ────────────────────────────────────────────────────────
 @app.get("/monitoring/drift")
 async def drift_endpoint():
     if not MONITOR_AVAILABLE:
@@ -541,12 +647,11 @@ async def analytics():
         if stats:
             return stats
 
-    # Seeded demo data when no real predictions logged yet
     airlines = ["WN","AA","DL","UA","B6","AS","NK","F9","MQ","OO"]
     return {
         "total_predictions": 248,
         "overall_delay_rate": 42.3,
-        "avg_probability": 0.461,
+        "avg_probability": 0.785,
         "airline_delay_rates": [
             {"airline": a, "delay_rate": round(random.uniform(25, 68), 1), "total": random.randint(10,40)}
             for a in airlines
@@ -598,15 +703,16 @@ def health():
     return {
         "status": "ok",
         "rag": RAG_AVAILABLE,
-        "ml": HAS_ML_LIBS and model is not None,
+        "ml": HAS_ML_LIBS,
         "monitor": MONITOR_AVAILABLE,
         "models": {
-            "ensemble": model is not None,
-            "xgboost": xgb_model is not None,
-            "catboost": cat_model is not None,
+            "ensemble": os.path.exists(MODEL_PATH) or model is not None,
+            "xgboost": os.path.exists(XGB_PATH) or xgb_model is not None,
+            "catboost": os.path.exists(CAT_PATH) or cat_model is not None,
+            "nn": os.path.exists(NN_KERAS_PATH) or os.path.exists(NN_PKL_PATH) or nn_model is not None,
         }
     }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8090)
