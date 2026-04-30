@@ -192,7 +192,7 @@ def get_monitoring_stats() -> dict:
     return {
         "total_predictions": total,
         "overall_delay_rate": round(delayed / total * 100, 1),
-        "avg_probability": round(sum(p["probability"] for p in preds) / total, 3),
+        "avg_probability": round(sum((p["probability"] if p["prediction"] == 1 else (1.0 - p["probability"])) for p in preds) / total, 3),
         "airline_delay_rates": airline_delay_rates[:10],
         "hourly_trend": hourly_trend,
         "recent": preds[-20:][::-1],
