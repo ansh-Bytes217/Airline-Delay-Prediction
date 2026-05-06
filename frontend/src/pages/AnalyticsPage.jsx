@@ -3,6 +3,7 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../config';
 
 const COLORS = ['#6366f1','#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#84cc16'];
 
@@ -26,12 +27,12 @@ export default function AnalyticsPage() {
   const [driftData, setDriftData] = useState(null);
 
   useEffect(() => {
-    fetch('http://127.0.0.1:8000/analytics')
+    fetch(`${API_BASE}/analytics`)
       .then(r => r.json())
       .then(data => { setStats(data); setLoading(false); })
       .catch(() => setLoading(false));
     
-    fetch('http://127.0.0.1:8000/monitoring/drift')
+    fetch(`${API_BASE}/monitoring/drift`)
       .then(r => r.json())
       .then(data => setDriftData(data))
       .catch(() => {});
@@ -162,7 +163,7 @@ export default function AnalyticsPage() {
                       {p.prediction === 1 ? '⚠ Delayed' : '✓ On Time'}
                     </span>
                   </td>
-                  <td>{(p.probability * 100).toFixed(1)}%</td>
+                  <td>{((p.prediction === 1 ? p.probability : 1.0 - p.probability) * 100).toFixed(1)}%</td>
                 </tr>
               ))}
             </tbody>
