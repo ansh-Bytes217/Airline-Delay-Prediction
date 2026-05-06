@@ -133,7 +133,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="landing-footer">
-        <p>Built with ❤️ using React · FastAPI · XGBoost · LangChain · Firebase</p>
+        <p>Built with passion by Ansh Malhotra</p>
       </footer>
     </div>
   );
