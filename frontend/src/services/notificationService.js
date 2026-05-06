@@ -6,6 +6,7 @@ import { getFirebaseMessaging, VAPID_KEY } from "../firebase";
  * Returns the token string or null if denied/unsupported.
  */
 export async function requestNotificationPermission() {
+  if (typeof Notification === 'undefined') return null;
   try {
     const messaging = await getFirebaseMessaging();
     if (!messaging) return null;
@@ -35,7 +36,7 @@ export async function onForegroundMessage(handler) {
  * In production this would be sent via Firebase Admin SDK from the backend.
  */
 export function showLocalNotification(title, body) {
-  if (Notification.permission === "granted") {
+  if (typeof Notification !== 'undefined' && Notification.permission === "granted") {
     new Notification(title, {
       body,
       icon: "/favicon.ico",
