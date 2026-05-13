@@ -17,3 +17,5 @@ public record WeatherData(
     double multiplier,
     String reason
 ) {}
+
+// Added Javadocs for WeatherData DTO
