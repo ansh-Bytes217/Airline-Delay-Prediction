@@ -14,3 +14,5 @@ public record PredictResponse(
 ) {
     public record ShapValue(String feature, double value) {}
 }
+
+// Added Javadocs for PredictResponse DTO
