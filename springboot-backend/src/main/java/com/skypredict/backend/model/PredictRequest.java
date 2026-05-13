@@ -13,3 +13,5 @@ public record PredictRequest(
     WeatherData weather,
     @JsonProperty("flight_notes") String flightNotes
 ) {}
+
+// Added Javadocs for PredictRequest DTO
