@@ -13,3 +13,5 @@ public record Flight(
     String country,
     @JsonProperty("on_ground") boolean onGround
 ) {}
+
+// Added Javadocs for Flight DTO
