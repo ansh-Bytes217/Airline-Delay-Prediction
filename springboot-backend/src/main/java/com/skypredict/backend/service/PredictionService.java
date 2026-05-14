@@ -144,3 +144,5 @@ public class PredictionService {
         return health;
     }
 }
+
+// Optimize gateway connection timeout limits
