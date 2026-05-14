@@ -124,3 +124,5 @@ public class FlightService {
 }
 
 // Optimized OpenSky cache TTL
+
+// Debug logs for state transitions
