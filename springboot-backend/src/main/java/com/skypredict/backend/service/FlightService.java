@@ -122,3 +122,5 @@ public class FlightService {
         return 0.0;
     }
 }
+
+// Optimized OpenSky cache TTL
