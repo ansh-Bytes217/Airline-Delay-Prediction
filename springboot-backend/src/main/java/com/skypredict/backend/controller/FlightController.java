@@ -133,3 +133,5 @@ public class FlightController {
         return ResponseEntity.ok(predictionService.getHealth());
     }
 }
+
+// Request validator safety helper
