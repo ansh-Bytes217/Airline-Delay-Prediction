@@ -167,3 +167,5 @@ public class WeatherService {
     private record WeatherImpact(String level, double multiplier, String reason) {}
     private record CachedWeather(WeatherData data, long timestamp) {}
 }
+
+// Logging weather fetch exceptions
