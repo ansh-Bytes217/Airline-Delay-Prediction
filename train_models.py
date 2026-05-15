@@ -363,3 +363,5 @@ if __name__ == '__main__':
 # Tweak learning rate parameter
 
 # Tweak estimator max depth parameter
+
+# Optimized training batch sizes
