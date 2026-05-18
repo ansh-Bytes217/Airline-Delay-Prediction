@@ -191,3 +191,5 @@ def ask_question(question: str):
         return f"Sorry, I encountered an error: {str(e)}", []
 
 # Optimized top-k retrieval depth
+
+# Log reciprocal rank fusion steps
