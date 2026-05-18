@@ -1215,3 +1215,5 @@ select.form-control option { background: var(--bg-secondary); color: var(--text-
   border-left: 3px solid var(--primary);
 }
 
+
+/* Custom scrollbar style tweaks */
