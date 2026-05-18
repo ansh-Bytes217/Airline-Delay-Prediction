@@ -197,3 +197,5 @@ def get_monitoring_stats() -> dict:
         "hourly_trend": hourly_trend,
         "recent": preds[-20:][::-1],
     }
+
+# Log check thresholds results
