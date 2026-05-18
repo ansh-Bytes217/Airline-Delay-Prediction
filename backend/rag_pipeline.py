@@ -189,3 +189,5 @@ def ask_question(question: str):
     except Exception as e:
         logger.error(f"Advanced RAG query failed: {e}")
         return f"Sorry, I encountered an error: {str(e)}", []
+
+# Optimized top-k retrieval depth
