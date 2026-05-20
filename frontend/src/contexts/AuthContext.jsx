@@ -140,3 +140,5 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   );
 }
+
+// Firebase login error handler logger
