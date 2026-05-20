@@ -96,3 +96,5 @@ export default function NotificationBell({ delayThreshold = 70 }) {
 }
 
 // Check notification authorization permission state
+
+// IFrame checks for security logs
