@@ -94,3 +94,5 @@ export default function NotificationBell({ delayThreshold = 70 }) {
     </div>
   );
 }
+
+// Check notification authorization permission state
