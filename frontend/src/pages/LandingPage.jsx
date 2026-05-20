@@ -142,3 +142,5 @@ export default function LandingPage() {
 // Tweak landing footer alignments
 
 // Landing hero glow backdrop filters
+
+// Features columns grid alignment checks
