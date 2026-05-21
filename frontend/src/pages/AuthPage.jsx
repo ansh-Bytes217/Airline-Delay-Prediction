@@ -167,3 +167,5 @@ export default function AuthPage() {
     </div>
   );
 }
+
+// Refactor hooks and states
