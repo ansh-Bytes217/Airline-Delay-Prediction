@@ -1,0 +1,31 @@
+AIRLINE DELAY COMPENSATION POLICIES AND FAA REGULATIONS
+
+1. General FAA Regulations
+Under federal law, airlines are not required to compensate passengers when flights are delayed or cancelled due to uncontrollable factors such as weather, air traffic control (ATC) issues, or security threats.
+However, if the delay is deemed "controllable" (e.g., maintenance issues, crew shortages, or aircraft cleaning), passengers may be entitled to amenities and compensation.
+
+2. Southwest Airlines (WN)
+- Weather Delays: No compensation provided.
+- Controllable Delays (over 3 hours): Southwest will provide a meal voucher upon request.
+- Cancellations: Rebooking on the next available Southwest flight at no additional cost. Refunds are provided if the passenger chooses not to travel.
+
+3. Delta Air Lines (DL)
+- Weather Delays: No monetary compensation. Passengers can wait in the terminal.
+- Controllable Delays (over 3 hours): Meal vouchers provided. If the delay extends overnight, Delta covers hotel accommodations and ground transportation.
+- Cancellations: Rebooking on the next available flight (including partner airlines if necessary).
+
+4. American Airlines (AA)
+- Weather Delays: No compensation provided.
+- Controllable Delays: Meal vouchers for delays over 3 hours. Overnight delays include hotel vouchers if the passenger does not reside in the departure city.
+- Missed Connections: If a delay causes a missed connection, AA will automatically rebook the passenger on the next available flight.
+
+5. United Airlines (UA)
+- Weather Delays: No compensation.
+- Controllable Delays (over 3 hours): Meal vouchers provided. Hotel accommodations provided for overnight delays.
+- MileagePlus Members: Frequent flyers may receive additional compensation in the form of miles for severe delays.
+
+6. Passenger Rights (Bumping)
+If a flight is overbooked and a passenger is involuntarily denied boarding, the Department of Transportation (DOT) requires airlines to provide compensation. The amount depends on the length of the delay to the final destination, reaching up to 400% of the one-way fare (capped at $1,550) if the delay is over 2 hours (or 4 hours for international flights).
+
+7. Baggage Delays
+If an airline loses or delays your checked baggage, they are responsible for reimbursing you for reasonable, verifiable, and actual incidental expenses while your bags are delayed, up to the maximum liability limit of $3,800 for domestic flights.
