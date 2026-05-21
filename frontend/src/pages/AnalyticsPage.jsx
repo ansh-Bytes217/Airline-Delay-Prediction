@@ -236,3 +236,5 @@ export default function AnalyticsPage() {
 }
 
 // Cleanup unused components imports
+
+// Weights details explanation tips
