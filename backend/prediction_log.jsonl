@@ -1,0 +1,5 @@
+{"ts": "2026-05-21T03:20:29.338449", "airline": "WN", "from": "ATL", "to": "DFW", "prediction": 0, "probability": 0.4923}
+{"ts": "2026-05-21T03:26:50.104226", "airline": "WN", "from": "ATL", "to": "DFW", "prediction": 0, "probability": 0.4923}
+{"ts": "2026-05-21T03:41:31.861471", "airline": "WN", "from": "ATL", "to": "DFW", "Time": 360, "Length": 120, "DayOfWeek": 1, "prediction": 0, "probability": 0.088}
+{"ts": "2026-05-21T03:44:19.696604", "airline": "WN", "from": "ATL", "to": "DFW", "Time": 360, "Length": 120, "DayOfWeek": 1, "prediction": 0, "probability": 0.088}
+{"ts": "2026-05-21T03:52:08.086571", "airline": "WN", "from": "ATL", "to": "DFW", "Time": 360, "Length": 120, "DayOfWeek": 1, "prediction": 0, "probability": 0.088}
