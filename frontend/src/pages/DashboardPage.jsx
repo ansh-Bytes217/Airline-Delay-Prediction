@@ -312,3 +312,5 @@ export default function DashboardPage() {
 }
 
 // Clean inline layout stylings
+
+// Confidence level display badge
