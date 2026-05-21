@@ -310,3 +310,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+// Clean inline layout stylings
