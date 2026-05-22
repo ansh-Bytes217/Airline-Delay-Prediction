@@ -729,3 +729,5 @@ export default function RadarPage() {
 }
 
 // Tuning vector line dimensions
+
+// Interval adjustments for polling safety
