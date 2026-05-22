@@ -346,3 +346,5 @@ export default function ThreeGlobe() {
 }
 
 // Globe particles array optimization
+
+// Materials division helper
