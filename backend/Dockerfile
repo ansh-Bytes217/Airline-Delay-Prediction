@@ -15,6 +15,6 @@ RUN pip install --no-cache-dir xgboost catboost shap imbalanced-learn
 COPY backend/ ./backend/
 COPY best_model.pkl ./
 
-EXPOSE 8000
+EXPOSE 8090
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8090"]

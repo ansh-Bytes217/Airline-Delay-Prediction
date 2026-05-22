@@ -149,10 +149,8 @@ def add_document_to_rag(file_path: str):
 
 def ask_question(question: str):
     global ensemble_retriever, cross_encoder, qa_llm
-    if ensemble_retriever is None:
-        initialized = init_rag_pipeline()
-        if not initialized:
-            return "Error: RAG pipeline is not initialized.", []
+    if ensemble_retriever is None or cross_encoder is None or qa_llm is None:
+        return "SkyPredict AI Policy Assistant is currently initializing (downloading neural models from HuggingFace). Please wait a minute and try again.", []
             
     try:
         # Retrieve candidate passages (Hybrid Search)

@@ -15,7 +15,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
-  if (e.request.url.includes('127.0.0.1:8000')) return; // Never cache API calls
+  if (e.request.url.includes(':8080')) return; // Never cache API calls
   e.respondWith(
     fetch(e.request).catch(() => caches.match(e.request))
   );

@@ -10,7 +10,7 @@ export default function AuthPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { login, signup, loginWithGoogle } = useAuth();
+  const { login, signup, loginWithGoogle, loginAsGuest } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -44,6 +44,18 @@ export default function AuthPage() {
       navigate('/dashboard');
     } catch (err) {
       setError('Google sign-in failed. Please try again.');
+    }
+    setLoading(false);
+  };
+
+  const handleGuest = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await loginAsGuest();
+      navigate('/dashboard');
+    } catch (err) {
+      setError('Guest login failed.');
     }
     setLoading(false);
   };
@@ -131,6 +143,25 @@ export default function AuthPage() {
             <path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.3-2.4 4.3-4.3 5.8l6 5.1c-.4.4 6.5-4.7 6.5-13.9 0-1.6-.2-3.2-.5-4.7l.6-.2z"/>
           </svg>
           Continue with Google
+        </button>
+
+        <button className="btn-guest-login" onClick={handleGuest} disabled={loading} style={{
+          width: '100%',
+          marginTop: '0.8rem',
+          padding: '0.8rem',
+          background: 'rgba(99, 102, 241, 0.1)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          borderRadius: '12px',
+          color: '#a78bfa',
+          fontWeight: '500',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.5rem',
+          transition: 'all 0.2s',
+        }}>
+          ✈ Enter as Guest / Demo Mode
         </button>
       </div>
     </div>

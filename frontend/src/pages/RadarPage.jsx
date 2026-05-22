@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-
-let L;
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { API_BASE } from '../config';
 
 // Global simulated fallback flights spread across the world
 const SIMULATED_FLIGHTS = Array.from({ length: 200 }, (_, i) => ({
@@ -15,15 +16,15 @@ const SIMULATED_FLIGHTS = Array.from({ length: 200 }, (_, i) => ({
   on_ground: false,
 }));
 
-const REGION_BOUNDS = {
-  world:    null,
-  northAm:  [[15, -170], [72, -50]],
-  europe:   [[35, -15],  [72, 45]],
-  asia:     [[5, 50],    [70, 150]],
-  mideast:  [[12, 30],   [45, 70]],
-  oceania:  [[-50, 100], [5, 180]],
-  southAm:  [[-60, -85], [15, -30]],
-  africa:   [[-40, -20], [38, 55]],
+const REGION_CENTERS = {
+  world:    { lat: 20, lon: 10, zoom: 9.0 },
+  northAm:  { lat: 40, lon: -100, zoom: 6.0 },
+  europe:   { lat: 50, lon: 15, zoom: 5.5 },
+  asia:     { lat: 35, lon: 100, zoom: 6.0 },
+  mideast:  { lat: 25, lon: 45, zoom: 5.5 },
+  oceania:  { lat: -25, lon: 135, zoom: 6.0 },
+  southAm:  { lat: -20, lon: -60, zoom: 6.0 },
+  africa:   { lat: 0, lon: 20, zoom: 6.0 },
 };
 
 const COUNTRY_FLAGS = {
@@ -55,12 +56,53 @@ const AIRPORT_COORDS = {
   GRU:[-23.4356,-46.4731], GIG:[-22.8099,-43.2505], EZE:[-34.8222,-58.5358],
 };
 
+const CONTINENTS = [
+  // North America
+  [[-168, 65], [-120, 68], [-80, 68], [-60, 60], [-55, 48], [-80, 25], [-98, 15], [-80, 8], [-77, 8], [-82, 10], [-99, 16], [-105, 20], [-110, 23], [-115, 32], [-125, 48], [-140, 60], [-160, 60]],
+  // South America
+  [[-78, 8], [-72, 10], [-60, 5], [-50, -5], [-35, -7], [-40, -20], [-60, -50], [-70, -55], [-75, -50], [-73, -40], [-72, -30], [-80, -15], [-81, -5]],
+  // Africa
+  [[-17, 32], [-5, 36], [10, 37], [25, 32], [34, 31], [33, 27], [51, 11], [46, -20], [34, -34], [18, -34], [10, -5], [10, 5], [-15, 15]],
+  // Eurasia
+  [[-10, 60], [20, 70], [60, 70], [100, 75], [140, 70], [170, 65], [180, 60], [170, 45], [140, 35], [120, 22], [105, 20], [95, 10], [80, 8], [75, 12], [73, 25], [50, 25], [40, 15], [35, 30], [27, 40], [-10, 40]],
+  // Australia
+  [[113, -25], [115, -34], [130, -32], [138, -35], [143, -38], [150, -34], [151, -22], [142, -10], [136, -12], [128, -22]],
+  // Greenland
+  [[-70, 75], [-60, 80], [-20, 80], [-35, 60], [-45, 60]],
+  // India (Sub-peninsula outline)
+  [[68, 23], [73, 25], [78, 23], [78, 10], [77, 8], [72, 20]]
+];
+
+const GLOBE_RADIUS = 4.0;
+
+function latLonToVector3(lat, lon, radius) {
+  const phi = (lat * Math.PI) / 180;
+  const theta = (-lon * Math.PI) / 180;
+  return new THREE.Vector3(
+    radius * Math.cos(phi) * Math.cos(theta),
+    radius * Math.sin(phi),
+    radius * Math.cos(phi) * Math.sin(theta)
+  );
+}
+
 export default function RadarPage() {
   const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const markersRef = useRef({});
-  const routeLayerRef = useRef(null);
+  
+  // ThreeJS Refs
+  const rendererRef = useRef(null);
+  const sceneRef = useRef(null);
+  const cameraRef = useRef(null);
+  const controlsRef = useRef(null);
+  const flightGroupRef = useRef(null);
+  const routeGroupRef = useRef(null);
+  const airportGroupRef = useRef(null);
+  const requestRef = useRef(null);
+  
+  // Animation tweening state
+  const cameraAnimRef = useRef(null);
+  const hoveredMeshRef = useRef(null);
 
+  // React state
   const [flights, setFlights] = useState([]);
   const [selected, setSelected] = useState(null);
   const [isLive, setIsLive] = useState(false);
@@ -70,70 +112,34 @@ export default function RadarPage() {
   const [pendingRoute, setPendingRoute] = useState(null);
   const [region, setRegion] = useState('world');
   const [countryFilter, setCountryFilter] = useState('');
+  const [tooltip, setTooltip] = useState(null);
 
+  // Deterministically map flight callsigns to origin/dest airports for 3D trajectory visualization
+  const getDeterministicRoute = useCallback((callsign) => {
+    const keys = Object.keys(AIRPORT_COORDS);
+    if (keys.length < 2) return null;
+    let hash = 0;
+    for (let i = 0; i < callsign.length; i++) {
+      hash = callsign.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    hash = Math.abs(hash);
+    const fromIdx = hash % keys.length;
+    let toIdx = (hash + 7) % keys.length;
+    if (fromIdx === toIdx) toIdx = (toIdx + 1) % keys.length;
+    return { from: keys[fromIdx], to: keys[toIdx] };
+  }, []);
+
+  // Listen for global flight trajectory events from other pages
   useEffect(() => {
     const handler = e => setPendingRoute(e.detail);
     window.addEventListener('skypredict:route', handler);
     return () => window.removeEventListener('skypredict:route', handler);
   }, []);
 
-  const getPlaneIcon = (heading, isSelected) => {
-    const color = isSelected ? '#f59e0b' : '#6366f1';
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
-      style="transform:rotate(${heading}deg);filter:drop-shadow(0 0 3px ${color})">
-      <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" fill="${color}"/>
-    </svg>`;
-    return L.divIcon({ html: svg, className: '', iconSize: [22, 22], iconAnchor: [11, 11] });
-  };
-
-  const drawRoute = useCallback((fromCode, toCode) => {
-    if (!mapInstanceRef.current || !L) return;
-    const map = mapInstanceRef.current;
-    if (routeLayerRef.current) { map.removeLayer(routeLayerRef.current); routeLayerRef.current = null; }
-    const fromCoord = AIRPORT_COORDS[fromCode];
-    const toCoord = AIRPORT_COORDS[toCode];
-    if (!fromCoord || !toCoord) return;
-
-    const points = [];
-    for (let t = 0; t <= 1; t += 0.03) {
-      const lat = fromCoord[0] + (toCoord[0] - fromCoord[0]) * t;
-      const lon = fromCoord[1] + (toCoord[1] - fromCoord[1]) * t;
-      const arc = Math.sin(Math.PI * t) * 5;
-      points.push([lat + arc, lon]);
-    }
-
-    routeLayerRef.current = L.layerGroup().addTo(map);
-    L.polyline(points, { color: '#f59e0b', weight: 2, opacity: 0.9, dashArray: '8,5' })
-      .addTo(routeLayerRef.current);
-    [fromCoord, toCoord].forEach((coord, i) => {
-      L.circleMarker(coord, { radius: 8, color: i === 0 ? '#10b981' : '#ef4444', fillColor: i === 0 ? '#10b981' : '#ef4444', fillOpacity: 0.85 })
-        .bindTooltip(i === 0 ? fromCode : toCode, { permanent: true, direction: 'top', className: 'airport-label' })
-        .addTo(routeLayerRef.current);
-    });
-    map.fitBounds(L.latLngBounds([fromCoord, toCoord]).pad(0.4));
-  }, []);
-
-  useEffect(() => {
-    if (pendingRoute && mapInstanceRef.current) {
-      drawRoute(pendingRoute.from, pendingRoute.to);
-      setPendingRoute(null);
-    }
-  }, [pendingRoute, drawRoute]);
-
-  // Apply region filter on the map
-  useEffect(() => {
-    if (!mapInstanceRef.current) return;
-    const bounds = REGION_BOUNDS[region];
-    if (bounds) {
-      mapInstanceRef.current.fitBounds(bounds, { animate: true, duration: 1.2 });
-    } else {
-      mapInstanceRef.current.setView([20, 10], 2, { animate: true });
-    }
-  }, [region]);
-
+  // Fetch flights from API or fallback
   const fetchFlights = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/flights', { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(`${API_BASE}/flights`, { signal: AbortSignal.timeout(8000) });
       if (res.ok) {
         const data = await res.json();
         if (data.flights?.length) {
@@ -144,7 +150,7 @@ export default function RadarPage() {
           return data.flights;
         }
       }
-    } catch (e) { console.warn('Backend /flights error:', e.message); }
+    } catch (e) { console.warn('Spring Boot /flights error:', e.message); }
     setFlights(SIMULATED_FLIGHTS);
     setFlightCount(SIMULATED_FLIGHTS.length);
     setTotalCount(SIMULATED_FLIGHTS.length);
@@ -152,71 +158,428 @@ export default function RadarPage() {
     return SIMULATED_FLIGHTS;
   };
 
-  const updateMarkers = useCallback((flightList, selectedIcao) => {
-    if (!mapInstanceRef.current || !L) return;
-    const map = mapInstanceRef.current;
-    const set = new Set(flightList.map(f => f.icao24));
-    Object.keys(markersRef.current).forEach(id => {
-      if (!set.has(id)) { map.removeLayer(markersRef.current[id]); delete markersRef.current[id]; }
+  // Draw 3D glowing flight path arcs
+  const draw3DRoute = useCallback((fromCode, toCode) => {
+    const scene = sceneRef.current;
+    const routeGroup = routeGroupRef.current;
+    if (!scene || !routeGroup) return;
+
+    // Clear old lines
+    routeGroup.clear();
+
+    const fromCoord = AIRPORT_COORDS[fromCode];
+    const toCoord = AIRPORT_COORDS[toCode];
+    if (!fromCoord || !toCoord) return;
+
+    const startVec = latLonToVector3(fromCoord[0], fromCoord[1], GLOBE_RADIUS);
+    const endVec = latLonToVector3(toCoord[0], toCoord[1], GLOBE_RADIUS);
+
+    // Calculate arc curve (raise midpoint above Earth)
+    const midVec = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
+    const dist = startVec.distanceTo(endVec);
+    const height = GLOBE_RADIUS + dist * 0.25;
+    midVec.normalize().multiplyScalar(height);
+
+    const curve = new THREE.QuadraticBezierCurve3(startVec, midVec, endVec);
+    const points = curve.getPoints(50);
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+    const lineMat = new THREE.LineBasicMaterial({
+      color: 0xf59e0b, // glowing gold
+      linewidth: 3,
+      transparent: true,
+      opacity: 0.9
     });
-    flightList.forEach(f => {
-      const icon = getPlaneIcon(f.heading, f.icao24 === selectedIcao);
-      if (markersRef.current[f.icao24]) {
-        markersRef.current[f.icao24].setLatLng([f.lat, f.lon]).setIcon(icon);
-      } else {
-        markersRef.current[f.icao24] = L.marker([f.lat, f.lon], { icon })
-          .addTo(map)
-          .on('click', () => handleSelectFlight(f));
-      }
-    });
-  }, []);
 
-  useEffect(() => {
-    let isMounted = true;
-    const initMap = async () => {
-      L = (await import('leaflet')).default;
-      await import('leaflet/dist/leaflet.css');
-      if (!isMounted || !mapRef.current || mapInstanceRef.current) return;
+    const routeLine = new THREE.Line(geometry, lineMat);
+    routeGroup.add(routeLine);
 
-      // World-view centered on Europe/Africa prime meridian for a clean global perspective
-      const map = L.map(mapRef.current, {
-        center: [20, 10],
-        zoom: 2,
-        zoomControl: false,
-        minZoom: 2,
-        maxBounds: [[-90, -220], [90, 220]],
-        maxBoundsViscosity: 0.8,
-      });
+    // Green origin beacon
+    const originMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0x10b981 })
+    );
+    originMesh.position.copy(startVec);
+    routeGroup.add(originMesh);
 
-      // Dark global tile with satellite-quality detail
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '©OpenStreetMap ©CARTO',
-        subdomains: 'abcd',
-        maxZoom: 19,
-      }).addTo(map);
+    // Red destination beacon
+    const destMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xef4444 })
+    );
+    destMesh.position.copy(endVec);
+    routeGroup.add(destMesh);
 
-      L.control.zoom({ position: 'bottomright' }).addTo(map);
-      mapInstanceRef.current = map;
-
-      const data = await fetchFlights();
-      if (isMounted) updateMarkers(data, null);
-
-      const interval = setInterval(async () => {
-        if (!isMounted) return;
-        const updated = await fetchFlights();
-        if (isMounted) updateMarkers(updated, selected?.icao24 || null);
-      }, 20000);
-      return () => clearInterval(interval);
+    // Animate camera to focus on the midpoint of the route arc
+    const camTarget = midVec.clone().normalize().multiplyScalar(GLOBE_RADIUS + dist * 1.5 + 2.0);
+    cameraAnimRef.current = {
+      startCameraPos: cameraRef.current.position.clone(),
+      startControlsTarget: controlsRef.current.target.clone(),
+      targetCameraPos: camTarget,
+      targetControlsTarget: midVec.clone().normalize().multiplyScalar(GLOBE_RADIUS),
+      duration: 1.5,
+      elapsed: 0
     };
-    initMap();
-    return () => { isMounted = false; };
   }, []);
 
-  const handleSelectFlight = f => {
+  // Handle external pending routes
+  useEffect(() => {
+    if (pendingRoute && sceneRef.current) {
+      draw3DRoute(pendingRoute.from, pendingRoute.to);
+      setPendingRoute(null);
+    }
+  }, [pendingRoute, draw3DRoute]);
+
+  // Center on region
+  useEffect(() => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+
+    const center = REGION_CENTERS[region];
+    if (center) {
+      const targetCamPos = latLonToVector3(center.lat, center.lon, GLOBE_RADIUS + center.zoom);
+      cameraAnimRef.current = {
+        startCameraPos: camera.position.clone(),
+        startControlsTarget: controls.target.clone(),
+        targetCameraPos: targetCamPos,
+        targetControlsTarget: new THREE.Vector3(0, 0, 0), // center of globe
+        duration: 1.2,
+        elapsed: 0
+      };
+    }
+  }, [region]);
+
+  // Sync flight positions onto the 3D globe
+  const updateFlightMeshes = useCallback((flightList, selectedIcao) => {
+    const flightGroup = flightGroupRef.current;
+    if (!flightGroup) return;
+
+    // Clear old flights
+    flightGroup.clear();
+
+    const coneGeom = new THREE.ConeGeometry(0.04, 0.12, 4);
+    coneGeom.rotateX(Math.PI / 2); // align cone forward with Z axis
+
+    flightList.forEach(f => {
+      const isSelected = f.icao24 === selectedIcao;
+      const color = isSelected ? 0xf59e0b : 0x6366f1; // gold if selected, indigo if not
+      
+      const material = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: isSelected ? 0.95 : 0.75
+      });
+      
+      const mesh = new THREE.Mesh(coneGeom, material);
+      const pos = latLonToVector3(f.lat, f.lon, GLOBE_RADIUS + 0.04);
+      mesh.position.copy(pos);
+
+      // Align local Y axis with sphere normal (stand upright on surface)
+      const normal = pos.clone().normalize();
+      const localUp = new THREE.Vector3(0, 1, 0);
+      mesh.quaternion.setFromUnitVectors(localUp, normal);
+
+      // Rotate around the normal axis by the heading angle
+      const headingRad = ((360 - f.heading) * Math.PI) / 180;
+      const headingRotation = new THREE.Quaternion().setFromAxisAngle(normal, headingRad);
+      mesh.quaternion.premultiply(headingRotation);
+
+      mesh.userData = { flight: f };
+      flightGroup.add(mesh);
+    });
+  }, []);
+
+  // Sync flight meshes when flights or selection state changes
+  useEffect(() => {
+    updateFlightMeshes(flights, selected?.icao24 || null);
+  }, [flights, selected, updateFlightMeshes]);
+
+  // Select flight
+  const handleSelectFlight = useCallback((f) => {
     setSelected(f);
-    mapInstanceRef.current?.flyTo([f.lat, f.lon], 7, { duration: 1.5 });
-    updateMarkers(flights, f.icao24);
-  };
+    const targetPos = latLonToVector3(f.lat, f.lon, GLOBE_RADIUS + 0.05);
+    const camTarget = latLonToVector3(f.lat, f.lon, GLOBE_RADIUS + 2.5); // zoom in close
+
+    cameraAnimRef.current = {
+      startCameraPos: cameraRef.current.position.clone(),
+      startControlsTarget: controlsRef.current.target.clone(),
+      targetCameraPos: camTarget,
+      targetControlsTarget: targetPos,
+      duration: 1.4,
+      elapsed: 0
+    };
+
+    const route = getDeterministicRoute(f.callsign || f.icao24);
+    if (route) {
+      draw3DRoute(route.from, route.to);
+    }
+  }, [getDeterministicRoute, draw3DRoute]);
+
+  // Initialize ThreeJS Scene
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    // 1. Setup Scene, Camera, Renderer
+    const container = mapRef.current;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x030308); // space dark
+    sceneRef.current = scene;
+
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+    camera.position.set(0, 5, 12);
+    cameraRef.current = camera;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.minDistance = GLOBE_RADIUS + 1.0;
+    controls.maxDistance = 25.0;
+    controlsRef.current = controls;
+
+    // 2. Add Groups
+    const flightGroup = new THREE.Group();
+    scene.add(flightGroup);
+    flightGroupRef.current = flightGroup;
+
+    const routeGroup = new THREE.Group();
+    scene.add(routeGroup);
+    routeGroupRef.current = routeGroup;
+
+    const airportGroup = new THREE.Group();
+    scene.add(airportGroup);
+    airportGroupRef.current = airportGroup;
+
+    // 3. Create Holographic Earth Canvas Texture
+    const mapCanvas = document.createElement('canvas');
+    mapCanvas.width = 2048;
+    mapCanvas.height = 1024;
+    const ctx = mapCanvas.getContext('2d');
+    
+    // Draw background
+    ctx.fillStyle = '#05040a';
+    ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+    // Draw meridian grids
+    ctx.strokeStyle = 'rgba(99, 102, 241, 0.08)';
+    ctx.lineWidth = 1;
+    for (let lat = -80; lat <= 80; lat += 10) {
+      const y = ((90 - lat) / 180) * mapCanvas.height;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(mapCanvas.width, y); ctx.stroke();
+    }
+    for (let lon = -180; lon <= 180; lon += 15) {
+      const x = ((lon + 180) / 360) * mapCanvas.width;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, mapCanvas.height); ctx.stroke();
+    }
+
+    // Draw Continents
+    ctx.fillStyle = 'rgba(67, 56, 202, 0.16)'; // deep translucent indigo
+    ctx.strokeStyle = 'rgba(129, 140, 248, 0.45)'; // neon blue outline
+    ctx.lineWidth = 2.0;
+
+    CONTINENTS.forEach(poly => {
+      ctx.beginPath();
+      poly.forEach(([lon, lat], idx) => {
+        const x = ((lon + 180) / 360) * mapCanvas.width;
+        const y = ((90 - lat) / 180) * mapCanvas.height;
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    });
+
+    const earthTexture = new THREE.CanvasTexture(mapCanvas);
+    const globeGeom = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
+    const globeMat = new THREE.MeshBasicMaterial({
+      map: earthTexture,
+      transparent: true,
+      opacity: 0.95
+    });
+    const globeMesh = new THREE.Mesh(globeGeom, globeMat);
+    scene.add(globeMesh);
+
+    // Glowing atmosphere wireframe shell
+    const wireframeGeom = new THREE.SphereGeometry(GLOBE_RADIUS + 0.02, 36, 18);
+    const wireframeMat = new THREE.MeshBasicMaterial({
+      color: 0x6366f1,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.08
+    });
+    const wireframeMesh = new THREE.Mesh(wireframeGeom, wireframeMat);
+    scene.add(wireframeMesh);
+
+    // Ambient space dust particles
+    const starCount = 500;
+    const starGeom = new THREE.BufferGeometry();
+    const starPosArray = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      const u = Math.random();
+      const v = Math.random();
+      const theta = u * 2.0 * Math.PI;
+      const phi = Math.acos(2.0 * v - 1.0);
+      const rAtm = GLOBE_RADIUS * (1.1 + Math.random() * 0.4);
+      starPosArray[i * 3] = rAtm * Math.sin(phi) * Math.cos(theta);
+      starPosArray[i * 3 + 1] = rAtm * Math.sin(phi) * Math.sin(theta);
+      starPosArray[i * 3 + 2] = rAtm * Math.cos(phi);
+    }
+    starGeom.setAttribute('position', new THREE.BufferAttribute(starPosArray, 3));
+    const starMat = new THREE.PointsMaterial({
+      color: 0x4f46e5,
+      size: 0.03,
+      transparent: true,
+      opacity: 0.35
+    });
+    const stars = new THREE.Points(starGeom, starMat);
+    scene.add(stars);
+
+    // Plot airports as static nodes
+    Object.entries(AIRPORT_COORDS).forEach(([code, coord]) => {
+      const airportMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.025, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0x818cf8, transparent: true, opacity: 0.6 })
+      );
+      airportMesh.position.copy(latLonToVector3(coord[0], coord[1], GLOBE_RADIUS + 0.01));
+      airportGroup.add(airportMesh);
+    });
+
+    // 4. Raycaster & Mouse Hover Event listeners
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    const onMouseMove = (e) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(flightGroup.children);
+      
+      if (intersects.length > 0) {
+        const flightMesh = intersects[0].object;
+        const flight = flightMesh.userData.flight;
+        
+        // Show tooltip positioned near the cursor
+        setTooltip({
+          flight,
+          x: e.clientX + 15,
+          y: e.clientY - 45
+        });
+        
+        if (hoveredMeshRef.current !== flightMesh) {
+          if (hoveredMeshRef.current) {
+            hoveredMeshRef.current.material.color.setHex(
+              hoveredMeshRef.current.userData.flight.icao24 === selected?.icao24 ? 0xf59e0b : 0x6366f1
+            );
+          }
+          hoveredMeshRef.current = flightMesh;
+          flightMesh.material.color.setHex(0xf59e0b); // highlight on hover
+        }
+      } else {
+        setTooltip(null);
+        if (hoveredMeshRef.current) {
+          hoveredMeshRef.current.material.color.setHex(
+            hoveredMeshRef.current.userData.flight.icao24 === selected?.icao24 ? 0xf59e0b : 0x6366f1
+          );
+          hoveredMeshRef.current = null;
+        }
+      }
+    };
+
+    const onClick = (e) => {
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(flightGroup.children);
+      if (intersects.length > 0) {
+        const flight = intersects[0].object.userData.flight;
+        handleSelectFlight(flight);
+      }
+    };
+
+    renderer.domElement.addEventListener('mousemove', onMouseMove);
+    renderer.domElement.addEventListener('click', onClick);
+
+    // 5. Animation Render loop
+    let lastTime = 0;
+    const animate = (time) => {
+      const dt = (time - lastTime) / 1000;
+      lastTime = time;
+
+      // Subtle atmospheric rotation
+      globeMesh.rotation.y += 0.005 * dt;
+      wireframeMesh.rotation.y += 0.003 * dt;
+      stars.rotation.y -= 0.002 * dt;
+
+      // Smooth Camera Animation Glide
+      if (cameraAnimRef.current) {
+        const anim = cameraAnimRef.current;
+        anim.elapsed += dt;
+        const t = Math.min(anim.elapsed / anim.duration, 1.0);
+        const ease = t * t * (3 - 2 * t); // smoothstep
+
+        if (!anim.startCameraPos) {
+          anim.startCameraPos = camera.position.clone();
+          anim.startControlsTarget = controls.target.clone();
+        }
+
+        camera.position.lerpVectors(anim.startCameraPos, anim.targetCameraPos, ease);
+        controls.target.lerpVectors(anim.startControlsTarget, anim.targetControlsTarget, ease);
+
+        if (t >= 1.0) cameraAnimRef.current = null;
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+      requestRef.current = requestAnimationFrame(animate);
+    };
+
+    // Trigger initial flights fetch
+    fetchFlights().then(data => {
+      updateFlightMeshes(data, null);
+    });
+
+    const pollInterval = setInterval(async () => {
+      const updated = await fetchFlights();
+      updateFlightMeshes(updated, selected?.icao24 || null);
+    }, 20000);
+
+    requestRef.current = requestAnimationFrame(animate);
+
+    // 6. Handle Resizing
+    const handleResize = () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(requestRef.current);
+      if (renderer.domElement && container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+      renderer.dispose();
+      globeGeom.dispose();
+      globeMat.dispose();
+      wireframeGeom.dispose();
+      wireframeMat.dispose();
+      starGeom.dispose();
+      starMat.dispose();
+      earthTexture.dispose();
+    };
+  }, [handleSelectFlight, updateFlightMeshes, selected]);
 
   const handleSearch = e => {
     const q = e.target.value.toUpperCase();
@@ -249,7 +612,7 @@ export default function RadarPage() {
     <div className="radar-page">
       <aside className="radar-sidebar">
         <div className="radar-sidebar-header">
-          <h2>🛰️ Global Radar</h2>
+          <h2>🛰️ Global 3D Radar</h2>
           <div className="radar-status">
             <span className={`fids-dot ${isLive ? 'live' : 'sim'}`}></span>
             <span>{isLive ? 'LIVE' : 'SIM'} — {flightCount.toLocaleString()} shown {totalCount > flightCount ? `of ${totalCount.toLocaleString()}` : ''}</span>
@@ -335,7 +698,32 @@ export default function RadarPage() {
           </div>
         )}
       </aside>
-      <div className="radar-map" ref={mapRef}></div>
+      <div className="radar-map" ref={mapRef} style={{ position: 'relative' }}>
+        {/* Glowing Raycaster Tooltip overlay */}
+        {tooltip && (
+          <div style={{
+            position: 'fixed',
+            left: tooltip.x,
+            top: tooltip.y,
+            background: 'rgba(10, 10, 20, 0.85)',
+            border: '1px solid rgba(99, 102, 241, 0.4)',
+            boxShadow: '0 0 15px rgba(99, 102, 241, 0.25)',
+            borderRadius: '6px',
+            padding: '0.4rem 0.6rem',
+            color: '#fff',
+            fontSize: '0.75rem',
+            pointerEvents: 'none',
+            zIndex: 100,
+            backdropFilter: 'blur(3px)',
+            transition: 'opacity 0.15s ease'
+          }}>
+            <div style={{ fontWeight: 'bold', color: '#a78bfa' }}>{tooltip.flight.callsign || tooltip.flight.icao24}</div>
+            <div style={{ color: '#94a3b8' }}>Country: {tooltip.flight.country}</div>
+            <div style={{ color: '#94a3b8' }}>Alt: {tooltip.flight.altitude?.toLocaleString()} ft</div>
+            <div style={{ color: '#94a3b8' }}>Speed: {tooltip.flight.speed} kts</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

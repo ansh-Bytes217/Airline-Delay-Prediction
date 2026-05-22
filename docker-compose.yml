@@ -1,14 +1,34 @@
 version: '3.8'
 
 services:
-  backend:
+  ml-sidecar:
     build:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      - "8090:8090"
     environment:
       - HOST=0.0.0.0
+    volumes:
+      - ./backend:/app/backend
+      - ./best_model.pkl:/app/best_model.pkl
+      - ./xgb_model.pkl:/app/xgb_model.pkl
+      - ./cat_model.pkl:/app/cat_model.pkl
+      - ./keras_model.h5:/app/keras_model.h5
+      - ./feature_mappings.pkl:/app/feature_mappings.pkl
+      - ./airlines_delay.csv:/app/airlines_delay.csv
+    restart: unless-stopped
+
+  springboot-backend:
+    build:
+      context: ./springboot-backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHON_ML_SERVICE_URL=http://ml-sidecar:8090
+    depends_on:
+      - ml-sidecar
     restart: unless-stopped
 
   frontend:
@@ -18,5 +38,6 @@ services:
     ports:
       - "5173:5173"
     depends_on:
-      - backend
+      - springboot-backend
     restart: unless-stopped
+

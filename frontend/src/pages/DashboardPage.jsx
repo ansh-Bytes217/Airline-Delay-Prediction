@@ -5,6 +5,7 @@ import { savePrediction } from '../services/firestoreService';
 import { showLocalNotification } from '../services/notificationService';
 import PredictionHistory from '../components/PredictionHistory';
 import WeatherWidget from '../components/WeatherWidget';
+import { API_BASE } from '../config';
 
 
 export default function DashboardPage() {
@@ -47,14 +48,14 @@ export default function DashboardPage() {
     setLoading(true); setError(null); setPrediction(null); setAbResults(null);
     try {
       if (abMode) {
-        const r = await fetch('http://127.0.0.1:8000/predict/ab', {
+        const r = await fetch(`${API_BASE}/predict/ab`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...formData, model: 'ensemble', weather: weatherData, flight_notes: flightNotes }),
         });
         if (!r.ok) throw new Error('AB request failed');
         setAbResults(await r.json());
       } else {
-        const r = await fetch('http://127.0.0.1:8000/predict', {
+        const r = await fetch(`${API_BASE}/predict`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...formData, model: selectedModel, weather: weatherData, flight_notes: flightNotes }),
         });
@@ -87,7 +88,7 @@ export default function DashboardPage() {
     setChatHistory(prev => [...prev, { sender:'user', text:userMsg }]);
     setChatMessage(''); setChatLoading(true);
     try {
-      const r = await fetch('http://127.0.0.1:8000/chat', {
+      const r = await fetch(`${API_BASE}/chat`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ message: userMsg }),
       });
@@ -108,7 +109,7 @@ export default function DashboardPage() {
       const fd = new FormData();
       fd.append('file', acceptedFiles[0]);
       try {
-        const r = await fetch('http://127.0.0.1:8000/upload-doc', { method:'POST', body: fd });
+        const r = await fetch(`${API_BASE}/upload-doc`, { method:'POST', body: fd });
         const data = await r.json();
         setUploadMsg(r.ok ? `✅ ${data.message}` : `❌ ${data.detail}`);
       } catch {
@@ -119,41 +120,44 @@ export default function DashboardPage() {
 
   const formatTime = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
 
-  const ResultCard = ({ data, label }) => (
-    <div className={`result-card ${data.prediction===1?'delayed':'on-time'}`}>
-      {label && <div className="ab-label">{label}</div>}
-      <div className="result-icon">{data.prediction===1?'✈️':'✅'}</div>
-      <h2 className="result-title">{data.prediction===1?'Likely Delayed':'On Time'}</h2>
-      <div className="prob-container">
-        <span className="prob-label">Confidence</span>
-        <div className="prob-bar-bg">
-          <div className="prob-bar-fill" style={{ width:`${(data.probability*100).toFixed(0)}%` }}></div>
-        </div>
-        <span className="prob-value">{(data.probability*100).toFixed(1)}%</span>
-      </div>
-      {data.shap_values?.length > 0 && (
-        <div className="shap-container">
-          <h3 className="shap-title">AI Decision Breakdown</h3>
-          <div className="shap-list">
-            {data.shap_values.map((item,idx) => (
-              <div key={idx} className="shap-item">
-                <span className="shap-feature">{item.feature}</span>
-                <div className="shap-bar-container">
-                  <div className={`shap-bar ${item.value>0?'shap-positive':'shap-negative'}`}
-                    style={{ width:`${Math.min(Math.abs(item.value)*100,100)}%`,
-                      marginLeft: item.value<0?'auto':'0', marginRight: item.value>0?'auto':'0' }}>
-                  </div>
-                </div>
-                <span className={`shap-value ${item.value>0?'text-danger':'text-success'}`}>
-                  {item.value>0?'+':''}{item.value.toFixed(2)}
-                </span>
-              </div>
-            ))}
+  const ResultCard = ({ data, label }) => {
+    const confidence = data.prediction === 1 ? data.probability * 100 : (1.0 - data.probability) * 100;
+    return (
+      <div className={`result-card ${data.prediction===1?'delayed':'on-time'}`}>
+        {label && <div className="ab-label">{label}</div>}
+        <div className="result-icon">{data.prediction===1?'✈️':'✅'}</div>
+        <h2 className="result-title">{data.prediction===1?'Likely Delayed':'On Time'}</h2>
+        <div className="prob-container">
+          <span className="prob-label">Confidence</span>
+          <div className="prob-bar-bg">
+            <div className="prob-bar-fill" style={{ width:`${confidence.toFixed(0)}%` }}></div>
           </div>
+          <span className="prob-value">{confidence.toFixed(1)}%</span>
         </div>
-      )}
-    </div>
-  );
+        {data.shap_values?.length > 0 && (
+          <div className="shap-container">
+            <h3 className="shap-title">AI Decision Breakdown</h3>
+            <div className="shap-list">
+              {data.shap_values.map((item,idx) => (
+                <div key={idx} className="shap-item">
+                  <span className="shap-feature">{item.feature}</span>
+                  <div className="shap-bar-container">
+                    <div className={`shap-bar ${item.value>0?'shap-positive':'shap-negative'}`}
+                      style={{ width:`${Math.min(Math.abs(item.value)*100,100)}%`,
+                        marginLeft: item.value<0?'auto':'0', marginRight: item.value>0?'auto':'0' }}>
+                    </div>
+                  </div>
+                  <span className={`shap-value ${item.value>0?'text-danger':'text-success'}`}>
+                    {item.value>0?'+':''}{item.value.toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="app-container">
@@ -165,10 +169,10 @@ export default function DashboardPage() {
       {/* Model selector */}
       <div className="model-selector-bar">
         <div className="model-tabs">
-          {['ensemble','xgboost','catboost'].map(m => (
+          {['ensemble','xgboost','catboost','nn'].map(m => (
             <button key={m} className={`model-tab ${selectedModel===m&&!abMode?'active':''}`}
               onClick={() => { setSelectedModel(m); setAbMode(false); }}>
-              {m.charAt(0).toUpperCase()+m.slice(1)}
+              {m === 'nn' ? 'Neural Network' : m.charAt(0).toUpperCase()+m.slice(1)}
             </button>
           ))}
           <button className={`model-tab ab-tab ${abMode?'active':''}`}

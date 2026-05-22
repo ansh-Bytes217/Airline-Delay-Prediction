@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 
 // Maps weather descriptors to emoji icons
 function getWeatherIcon(desc) {
@@ -23,7 +24,7 @@ export default function WeatherWidget({ airportCode, onWeatherLoaded }) {
     setLoading(true);
     setError(null);
 
-    fetch(`http://127.0.0.1:8000/weather/${airportCode}`)
+    fetch(`${API_BASE}/weather/${airportCode}`)
       .then((res) => {
         if (!res.ok) throw new Error('Failed to fetch weather');
         return res.json();

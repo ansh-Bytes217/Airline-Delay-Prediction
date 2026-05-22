@@ -51,7 +51,9 @@ export default function PredictionHistory({ refreshTrigger }) {
                     <span className={`badge ${p.prediction === 1 ? 'badge-danger' : 'badge-success'}`}>
                       {p.prediction === 1 ? '⚠ Delayed' : '✓ On Time'}
                     </span>
-                    <span className="pred-prob">{(p.probability * 100).toFixed(0)}%</span>
+                    <span className="pred-prob">
+                      {((p.prediction === 1 ? p.probability : 1.0 - p.probability) * 100).toFixed(0)}%
+                    </span>
                   </div>
                 </div>
               ))}

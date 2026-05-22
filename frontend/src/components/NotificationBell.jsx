@@ -9,8 +9,10 @@ export default function NotificationBell({ delayThreshold = 70 }) {
 
   useEffect(() => {
     // Check existing permission
-    if (Notification.permission === 'granted') setStatus('granted');
-    else if (Notification.permission === 'denied') setStatus('denied');
+    if (typeof Notification !== 'undefined') {
+      if (Notification.permission === 'granted') setStatus('granted');
+      else if (Notification.permission === 'denied') setStatus('denied');
+    }
 
     // Listen for foreground FCM messages
     let unsub;
@@ -23,6 +25,10 @@ export default function NotificationBell({ delayThreshold = 70 }) {
   }, []);
 
   const handleEnable = async () => {
+    if (typeof Notification === 'undefined') {
+      setStatus('denied');
+      return;
+    }
     setStatus('requesting');
     const token = await requestNotificationPermission();
     if (token) {
