@@ -4,3 +4,9 @@ pydantic
 pandas
 scikit-learn
 joblib
+slowapi
+httpx
+scipy
+xgboost
+catboost
+shap
