@@ -169,14 +169,63 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## 🐳 Docker Deployment
 
-To launch the entire containerized microservice mesh in a production configuration, run:
+To launch the entire containerized microservice mesh in a local production simulation, run:
 ```bash
 docker-compose up --build
 ```
 This boots:
-1. `ml-sidecar` at `http://localhost:8090`
-2. `springboot-backend` at `http://localhost:8080` (proxying requests to `ml-sidecar` inside the Docker network)
-3. `frontend` at `http://localhost:5173`
+1. `ml-sidecar` at `http://localhost:8090` (Fully self-contained image copying all model files, weights, and mappings).
+2. `springboot-backend` at `http://localhost:8080` (Proxying prediction, chatbot, and drift tracking requests to `ml-sidecar` inside the Docker network).
+3. `frontend` at `http://localhost:5173` (Accessing the gateway dynamically).
+
+---
+
+## ☁️ Cloud Deployment (Render / Railway)
+
+Because the project is fully dockerized, deploying to a cloud Platform-as-a-Service (PaaS) like **Render** or **Railway** is the fastest and most reliable route. 
+
+Deploy the services in the following order:
+
+### 1. Python ML Sidecar (`ml-sidecar`)
+* **Deployment Type:** Web Service (Private Service if supported, or public Web Service).
+* **Source:** Connect your GitHub repository.
+* **Build Configuration:**
+  * **Build Type:** Docker
+  * **Dockerfile Path:** `backend/Dockerfile`
+  * **Build Context:** Project Root (`.`)
+* **Environment Variables:**
+  * `HOST`: `0.0.0.0`
+  * `PORT`: `8090`
+* **Resource Plan:** Minimum **1GB RAM** is recommended due to HuggingFace transformers (`DistilBERT`) and `FAISS` memory allocations.
+* **Result:** Save the generated service URL (e.g. `https://ml-sidecar.onrender.com` or internal URL `http://ml-sidecar:8090`).
+
+### 2. Spring Boot Gateway (`springboot-backend`)
+* **Deployment Type:** Web Service (Public).
+* **Source:** Connect your GitHub repository.
+* **Build Configuration:**
+  * **Build Type:** Docker
+  * **Dockerfile Path:** `Dockerfile`
+  * **Build Context:** `./springboot-backend` (or root with path specified)
+* **Environment Variables:**
+  * `PYTHON_ML_SERVICE_URL`: Set this to your Python ML Sidecar URL (e.g., `https://ml-sidecar.onrender.com` or `http://ml-sidecar:8090`).
+  * `PORT`: `8080`
+* **Result:** Save the generated gateway URL (e.g. `https://skypredict-gateway.onrender.com`).
+
+### 3. React Frontend (`frontend`)
+* **Deployment Type:** Static Site (Fastest, zero-cost static hosting) or Docker Web Service.
+* **Source:** Connect your GitHub repository.
+* **Build Configuration (Static Site Option):**
+  * **Build Command:** `npm run build`
+  * **Publish Directory:** `dist`
+  * **Root Directory:** `frontend`
+* **Build Configuration (Docker Option):**
+  * **Build Type:** Docker
+  * **Dockerfile Path:** `Dockerfile`
+  * **Build Context:** `./frontend`
+* **Environment Variables (Crucial for build time):**
+  * `VITE_API_BASE`: Set this to your Spring Boot Gateway URL (e.g., `https://skypredict-gateway.onrender.com`). *Do not append a slash at the end.*
+* **Result:** The application is live at your frontend URL (e.g. `https://skypredict.onrender.com`).
+
 
 ---
 

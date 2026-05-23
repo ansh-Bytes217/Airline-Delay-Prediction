@@ -14,6 +14,11 @@ RUN pip install --no-cache-dir xgboost catboost shap imbalanced-learn
 
 COPY backend/ ./backend/
 COPY best_model.pkl ./
+COPY xgb_model.pkl ./
+COPY cat_model.pkl ./
+COPY keras_model.h5 ./
+COPY feature_mappings.pkl ./
+COPY airlines_delay.csv ./
 
 EXPOSE 8090
 
