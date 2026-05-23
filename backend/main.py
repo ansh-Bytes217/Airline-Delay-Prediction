@@ -213,8 +213,7 @@ app.add_middleware(
 async def startup_event():
     logging.basicConfig(level=logging.INFO)
     logging.info("SkyPredict ML Sidecar listening on port 8090")
-    load_models()
-    load_feature_mappings()
+    # Lazy load models and mappings on-demand inside the endpoints to prevent Vercel 10s startup timeouts
     if RAG_AVAILABLE:
         import threading
         threading.Thread(target=init_rag_pipeline, daemon=True).start()
@@ -694,13 +693,13 @@ def health():
     return {
         "status": "ok",
         "rag": RAG_AVAILABLE,
-        "ml": HAS_ML_LIBS and (model is not None or nn_model is not None),
+        "ml": HAS_ML_LIBS,
         "monitor": MONITOR_AVAILABLE,
         "models": {
-            "ensemble": model is not None,
-            "xgboost": xgb_model is not None,
-            "catboost": cat_model is not None,
-            "nn": nn_model is not None,
+            "ensemble": os.path.exists(MODEL_PATH) or model is not None,
+            "xgboost": os.path.exists(XGB_PATH) or xgb_model is not None,
+            "catboost": os.path.exists(CAT_PATH) or cat_model is not None,
+            "nn": os.path.exists(NN_KERAS_PATH) or os.path.exists(NN_PKL_PATH) or nn_model is not None,
         }
     }
 
