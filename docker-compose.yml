@@ -41,3 +41,5 @@ services:
       - springboot-backend
     restart: unless-stopped
 
+
+# Adding container networking mappings aliases
