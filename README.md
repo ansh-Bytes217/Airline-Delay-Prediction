@@ -237,3 +237,5 @@ The baseline classifiers were trained on sequential temporal cuts of flight sche
 * **MLOps Drift Detection:** Running a Kolmogorov-Smirnov test on numerical features triggers warning alerts if the live distribution deviates significantly ($p < 0.05$).
 
 <!-- Added settings credentials documentation -->
+
+<!-- Added quickstart automation instructions -->
