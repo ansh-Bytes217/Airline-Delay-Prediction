@@ -235,3 +235,5 @@ The baseline classifiers were trained on sequential temporal cuts of flight sche
 * **Stacking Classifier Ensemble:** ~72.4% ROC-AUC on class-balanced (SMOTE) validation sets.
 * **Explainability (SHAP):** Features capturing departure hour peaks (`Departure_Hour`) and weather coefficients (`Wind_Speed`) show the highest influence on delay probability.
 * **MLOps Drift Detection:** Running a Kolmogorov-Smirnov test on numerical features triggers warning alerts if the live distribution deviates significantly ($p < 0.05$).
+
+<!-- Added settings credentials documentation -->
