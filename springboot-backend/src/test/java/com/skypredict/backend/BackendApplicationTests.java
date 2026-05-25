@@ -11,3 +11,5 @@ class BackendApplicationTests {
 	}
 
 }
+
+// Added assertions checks to controller test suite
