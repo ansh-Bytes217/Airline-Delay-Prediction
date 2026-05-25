@@ -135,3 +135,5 @@ public class FlightController {
 }
 
 // Request validator safety helper
+
+// CORS bad requests exceptions handlers
