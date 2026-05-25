@@ -239,3 +239,5 @@ The baseline classifiers were trained on sequential temporal cuts of flight sche
 <!-- Added settings credentials documentation -->
 
 <!-- Added quickstart automation instructions -->
+
+<!-- Documented JSON structures -->
