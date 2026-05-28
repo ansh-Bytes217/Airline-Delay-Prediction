@@ -7,6 +7,7 @@ import com.skypredict.backend.model.WeatherData;
 import com.skypredict.backend.service.FlightService;
 import com.skypredict.backend.service.PredictionService;
 import com.skypredict.backend.service.WeatherService;
+import com.skypredict.backend.service.SmsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -24,12 +25,15 @@ public class FlightController {
     private final WeatherService weatherService;
     private final FlightService flightService;
     private final PredictionService predictionService;
+    private final SmsService smsService;
 
-    public FlightController(WeatherService weatherService, FlightService flightService, PredictionService predictionService) {
+    public FlightController(WeatherService weatherService, FlightService flightService, PredictionService predictionService, SmsService smsService) {
         this.weatherService = weatherService;
         this.flightService = flightService;
         this.predictionService = predictionService;
+        this.smsService = smsService;
     }
+
 
     @GetMapping("/weather/{airport}")
     public ResponseEntity<Map<String, Object>> getWeather(@PathVariable String airport) {
@@ -74,7 +78,19 @@ public class FlightController {
         );
         
         PredictResponse response = predictionService.predict(enrichedRequest);
+        
+        // Trigger Twilio SMS alert async if high delay probability (>70%) is predicted
+        if (response.prediction() == 1 && response.probability() >= 0.70) {
+            smsService.sendDelayAlertAsync(
+                enrichedRequest.airline(),
+                enrichedRequest.airportFrom(),
+                enrichedRequest.airportTo(),
+                response.probability()
+            );
+        }
+        
         return ResponseEntity.ok(response);
+
     }
 
     @PostMapping("/predict/ab")

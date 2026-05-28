@@ -81,11 +81,13 @@ export default function ThreeGlobe() {
 
     // Wireframe Outer Earth
     const earthGeo = new THREE.SphereGeometry(globeRadius, 36, 36);
-    const earthMat = new THREE.MeshBasicMaterial({
+    const earthMat = new THREE.MeshStandardMaterial({
       color: 0x6366f1,
       wireframe: true,
       transparent: true,
-      opacity: 0.28
+      opacity: 0.35,
+      roughness: 0.5,
+      metalness: 0.8
     });
     const earthWire = new THREE.Mesh(earthGeo, earthMat);
     globeGroup.add(earthWire);
@@ -99,6 +101,49 @@ export default function ThreeGlobe() {
     });
     const core = new THREE.Mesh(coreGeo, coreMat);
     globeGroup.add(core);
+
+    // Day/Night Lights
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    scene.add(sunLight);
+
+    const ambientLight = new THREE.AmbientLight(0x0a0c18, 0.45);
+    scene.add(ambientLight);
+
+    // Weather Overlay Canvas
+    const weatherCanvas = document.createElement('canvas');
+    weatherCanvas.width = 512;
+    weatherCanvas.height = 256;
+    const wCtx = weatherCanvas.getContext('2d');
+    
+    wCtx.clearRect(0, 0, weatherCanvas.width, weatherCanvas.height);
+    for (let i = 0; i < 20; i++) {
+      const x = Math.random() * weatherCanvas.width;
+      const y = (0.2 + Math.random() * 0.6) * weatherCanvas.height;
+      const r = 20 + Math.random() * 50;
+      
+      const grad = wCtx.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, 'rgba(239, 68, 68, 0.5)');
+      grad.addColorStop(0.3, 'rgba(245, 158, 11, 0.35)');
+      grad.addColorStop(0.6, 'rgba(16, 185, 129, 0.18)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      wCtx.fillStyle = grad;
+      wCtx.beginPath();
+      wCtx.arc(x, y, r, 0, Math.PI * 2);
+      wCtx.fill();
+    }
+    
+    const weatherTexture = new THREE.CanvasTexture(weatherCanvas);
+    const weatherGeom = new THREE.SphereGeometry(globeRadius + 0.08, 32, 32);
+    const weatherMat = new THREE.MeshBasicMaterial({
+      map: weatherTexture,
+      transparent: true,
+      opacity: 0.65,
+      blending: THREE.AdditiveBlending
+    });
+    const weatherMesh = new THREE.Mesh(weatherGeom, weatherMat);
+    globeGroup.add(weatherMesh);
+
 
     // ── 5. Add Airport Hubs ──────────────────────────────────────────────────
     const hubPoints = {};
@@ -251,11 +296,28 @@ export default function ThreeGlobe() {
     // ── 9. Animation Loop ─────────────────────────────────────────────────────
     let animationFrameId;
 
+    // Set up a clock to measure delta time
+    const clock = new THREE.Clock();
+    
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      const elapsed = clock.getElapsedTime();
 
       // Rotate starfield slowly
       starfield.rotation.y += 0.0003;
+
+      // Weather animation
+      weatherMesh.rotation.y += 0.008 * dt;
+      weatherMesh.rotation.x += 0.001 * dt;
+
+      // Sun lighting rotation
+      const sunAngle = elapsed * 0.08;
+      sunLight.position.set(
+        Math.cos(sunAngle) * 15,
+        3.0,
+        Math.sin(sunAngle) * 15
+      );
 
       // Decelerating rotation simulation (inertia)
       if (!isDragging) {
@@ -267,6 +329,7 @@ export default function ThreeGlobe() {
         // Maintain small perpetual rotation
         globeGroup.rotation.y += 0.001;
       }
+
 
       // Constrain rotation on X to prevent upside down flips
       globeGroup.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, globeGroup.rotation.x));
@@ -327,7 +390,11 @@ export default function ThreeGlobe() {
       coreMat.dispose();
       starGeo.dispose();
       starMat.dispose();
+      weatherGeom.dispose();
+      weatherMat.dispose();
+      weatherTexture.dispose();
       renderer.dispose();
+
     };
   }, []);
 

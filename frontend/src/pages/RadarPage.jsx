@@ -113,6 +113,27 @@ export default function RadarPage() {
   const [region, setRegion] = useState('world');
   const [countryFilter, setCountryFilter] = useState('');
   const [tooltip, setTooltip] = useState(null);
+  const [isTrackingCockpit, setIsTrackingCockpit] = useState(false);
+
+  const selectedRef = useRef(null);
+  const isTrackingCockpitRef = useRef(false);
+  const flightsRef = useRef([]);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+    if (!selected) {
+      setIsTrackingCockpit(false);
+    }
+  }, [selected]);
+
+  useEffect(() => {
+    isTrackingCockpitRef.current = isTrackingCockpit;
+  }, [isTrackingCockpit]);
+
+  useEffect(() => {
+    flightsRef.current = flights;
+  }, [flights]);
+
 
   // Deterministically map flight callsigns to origin/dest airports for 3D trajectory visualization
   const getDeterministicRoute = useCallback((callsign) => {
@@ -399,13 +420,59 @@ export default function RadarPage() {
 
     const earthTexture = new THREE.CanvasTexture(mapCanvas);
     const globeGeom = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
-    const globeMat = new THREE.MeshBasicMaterial({
+    const globeMat = new THREE.MeshStandardMaterial({
       map: earthTexture,
+      roughness: 0.7,
+      metalness: 0.1,
       transparent: true,
       opacity: 0.95
     });
     const globeMesh = new THREE.Mesh(globeGeom, globeMat);
     scene.add(globeMesh);
+
+    // Day/Night Cycle Lights
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    scene.add(sunLight);
+
+    const ambientLight = new THREE.AmbientLight(0x0a0c18, 0.45); // deep space blue fill
+    scene.add(ambientLight);
+
+    // Weather Layer Canvas
+    const weatherCanvas = document.createElement('canvas');
+    weatherCanvas.width = 1024;
+    weatherCanvas.height = 512;
+    const wCtx = weatherCanvas.getContext('2d');
+    
+    // Draw initial storm blobs
+    wCtx.clearRect(0, 0, weatherCanvas.width, weatherCanvas.height);
+    for (let i = 0; i < 30; i++) {
+      const x = Math.random() * weatherCanvas.width;
+      const y = (0.2 + Math.random() * 0.6) * weatherCanvas.height;
+      const r = 25 + Math.random() * 70;
+      
+      const grad = wCtx.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, 'rgba(239, 68, 68, 0.55)');    // Red core
+      grad.addColorStop(0.3, 'rgba(245, 158, 11, 0.4)');  // Orange ring
+      grad.addColorStop(0.6, 'rgba(16, 185, 129, 0.22)'); // Green outer
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      wCtx.fillStyle = grad;
+      wCtx.beginPath();
+      wCtx.arc(x, y, r, 0, Math.PI * 2);
+      wCtx.fill();
+    }
+    
+    const weatherTexture = new THREE.CanvasTexture(weatherCanvas);
+    const weatherGeom = new THREE.SphereGeometry(GLOBE_RADIUS + 0.05, 64, 64);
+    const weatherMat = new THREE.MeshBasicMaterial({
+      map: weatherTexture,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending
+    });
+    const weatherMesh = new THREE.Mesh(weatherGeom, weatherMat);
+    scene.add(weatherMesh);
+
 
     // Glowing atmosphere wireframe shell
     const wireframeGeom = new THREE.SphereGeometry(GLOBE_RADIUS + 0.02, 36, 18);
@@ -518,8 +585,44 @@ export default function RadarPage() {
       wireframeMesh.rotation.y += 0.003 * dt;
       stars.rotation.y -= 0.002 * dt;
 
-      // Smooth Camera Animation Glide
-      if (cameraAnimRef.current) {
+      // Weather layer rotation
+      weatherMesh.rotation.y += 0.009 * dt;
+      weatherMesh.rotation.x += 0.001 * dt;
+
+      // Day/Night Cycle sun light rotation
+      const sunAngle = time * 0.0001;
+      sunLight.position.set(
+        Math.cos(sunAngle) * 15,
+        3.0,
+        Math.sin(sunAngle) * 15
+      );
+
+      // Cockpit Camera Tracking or standard Glide animation
+      const isTracking = isTrackingCockpitRef.current;
+      controls.enabled = !isTracking;
+
+      if (isTracking && selectedRef.current) {
+        const activeFlight = (flightsRef.current && flightsRef.current.find(fl => fl.icao24 === selectedRef.current.icao24)) || selectedRef.current;
+        const pos = latLonToVector3(activeFlight.lat, activeFlight.lon, GLOBE_RADIUS + 0.04);
+        const normal = pos.clone().normalize();
+        const upWorld = new THREE.Vector3(0, 1, 0);
+        
+        const north = new THREE.Vector3().subVectors(upWorld, normal.clone().multiplyScalar(upWorld.dot(normal))).normalize();
+        const east = new THREE.Vector3().crossVectors(normal, north).normalize();
+        const headingRad = ((360 - activeFlight.heading) * Math.PI) / 180;
+        
+        const direction = new THREE.Vector3()
+          .addScaledVector(north, Math.cos(headingRad))
+          .addScaledVector(east, Math.sin(headingRad));
+
+        const targetCamPos = pos.clone()
+          .addScaledVector(direction, -0.6)
+          .addScaledVector(normal, 0.22);
+        const targetControlsTarget = pos.clone().addScaledVector(direction, 1.2);
+
+        camera.position.lerp(targetCamPos, 0.08);
+        controls.target.lerp(targetControlsTarget, 0.08);
+      } else if (cameraAnimRef.current) {
         const anim = cameraAnimRef.current;
         anim.elapsed += dt;
         const t = Math.min(anim.elapsed / anim.duration, 1.0);
@@ -535,6 +638,7 @@ export default function RadarPage() {
 
         if (t >= 1.0) cameraAnimRef.current = null;
       }
+
 
       controls.update();
       renderer.render(scene, camera);
@@ -578,6 +682,10 @@ export default function RadarPage() {
       starGeom.dispose();
       starMat.dispose();
       earthTexture.dispose();
+      weatherGeom.dispose();
+      weatherMat.dispose();
+      weatherTexture.dispose();
+
     };
   }, [handleSelectFlight, updateFlightMeshes, selected]);
 
@@ -658,11 +766,32 @@ export default function RadarPage() {
 
         {selected ? (
           <div className="flight-detail">
-            <button className="detail-back" onClick={() => setSelected(null)}>← Back</button>
+            <button className="detail-back" onClick={() => { setSelected(null); setIsTrackingCockpit(false); }}>← Back</button>
             <div className="detail-callsign">{selected.callsign || 'Unknown'}</div>
             <div className="detail-country">
               {COUNTRY_FLAGS[selected.country] || '🏳'} {selected.country}
             </div>
+            <button
+              onClick={() => setIsTrackingCockpit(prev => !prev)}
+              className="btn-cockpit-view"
+              style={{
+                width: '100%',
+                margin: '0.8rem 0',
+                padding: '0.5rem',
+                borderRadius: '8px',
+                border: isTrackingCockpit ? '1px solid #f59e0b' : '1px solid #6366f1',
+                background: isTrackingCockpit ? 'rgba(245, 158, 11, 0.15)' : 'rgba(99, 102, 241, 0.1)',
+                color: isTrackingCockpit ? '#f59e0b' : '#a78bfa',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '0.8rem',
+                transition: 'all 0.2s',
+                boxShadow: isTrackingCockpit ? '0 0 10px rgba(245, 158, 11, 0.2)' : 'none',
+              }}
+            >
+              {isTrackingCockpit ? '🎥 Exit Cockpit View' : '🎥 Enter Cockpit View'}
+            </button>
+
             <div className="detail-grid">
               {[
                 ['Altitude', `${selected.altitude?.toLocaleString()} ft`],
