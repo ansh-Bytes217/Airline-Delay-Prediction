@@ -80,7 +80,7 @@ except ImportError:
     MONITOR_AVAILABLE = False
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+limiter = Limiter(key_func=get_remote_address)
 
 # ── Weather Integration (Open-Meteo) — Fallback / Local testing ──────────────
 AIRPORT_COORDS = {
@@ -455,7 +455,7 @@ async def get_airport_weather(airport: str):
 
 # ── /predict ─────────────────────────────────────────────────────────────────
 @app.post("/predict")
-@limiter.limit("30/minute")
+@limiter.limit("300/minute")
 async def predict_delay(request: Request, flight: FlightData):
     # Proactively reload models and mappings if not loaded
     if HAS_ML_LIBS and (model is None or feature_mappings is None):
@@ -529,7 +529,7 @@ async def predict_delay(request: Request, flight: FlightData):
 
 # ── /predict/ab ─────────────────────────────────────────────────────────────
 @app.post("/predict/ab")
-@limiter.limit("20/minute")
+@limiter.limit("200/minute")
 async def predict_ab(request: Request, flight: FlightData):
     # Proactively reload models and mappings if not loaded
     if HAS_ML_LIBS and (model is None or feature_mappings is None):
@@ -769,8 +769,18 @@ async def get_flights():
     _flight_cache = {"data": result, "timestamp": now}
     return result
 
+# ── Root ──────────────────────────────────────────────────────────────────────
+@app.get("/")
+@limiter.exempt
+def read_root():
+    return {
+        "status": "alive",
+        "service": "SkyPredict ML Sidecar"
+    }
+
 # ── /health ───────────────────────────────────────────────────────────────────
 @app.get("/health")
+@limiter.exempt
 def health():
     return {
         "status": "ok",
